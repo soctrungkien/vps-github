@@ -1,0 +1,36 @@
+name: 💣 Auto Delete Repo After Run
+
+on:
+  workflow_dispatch:
+  push:
+  workflow_run:
+    workflows: ["VPS_github"]
+    types:
+      - completed
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: ⚙️ Checkout repo
+        uses: actions/checkout@v4
+
+      - name: 🧹 Cleanup logs (optional)
+        run: |
+          echo "🧽 Cleaning temporary files..."
+          rm -rf ./temp ./cache || true
+
+      - name: 🗑️ Delete repository when done
+        if: always()
+        run: |
+          echo "🚨 Deleting repo: $GITHUB_REPOSITORY ..."
+          curl -s -X DELETE \
+            -H "Authorization: token ${{ secrets.GH_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY" \
+            && echo "✅ Repo deleted successfully!" \
+            || echo "❌ Failed to delete repo."

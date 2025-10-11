@@ -1,0 +1,119 @@
+name: VPS_github
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [create-vps]
+
+env:
+  GITHUB_TOKEN_VPS: ${{ secrets.GH_TOKEN }}
+  MY_PASSWORD: ${{ secrets.MY_PASSWORD }}
+
+jobs:
+  deploy:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+    - name: ⬇️ Checkout source
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GH_TOKEN }}
+
+    - name: 🖥️ Cài đặt và chạy RDP + Cloudflared (Quick Tunnel)
+      shell: pwsh
+      run: |
+        Write-Host "📥 Enabling RDP and installing Cloudflared..."
+    
+        # Bật Remote Desktop
+        Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Write-Host "✅ Remote Desktop enabled and firewall opened"
+    
+        # Đặt password cho user hiện tại (nếu cần)
+        $password = "${{ secrets.MY_PASSWORD }}"
+        net user $env:USERNAME $password
+        Write-Host "🔐 Password set for user $env:USERNAME"
+    
+        # Cài Cloudflared
+        Write-Host "📥 Installing Cloudflared..."
+        Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe" -TimeoutSec 60
+        Unblock-File -Path "cloudflared.exe"
+        Write-Host "✅ Cloudflared downloaded"
+    
+        # Chạy Cloudflared quick tunnel cho RDP
+        Write-Host "🌐 Starting Cloudflared tunnel for RDP..."
+        $logFile = "cloudflared.log"
+        Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel","--url","rdp://localhost:3389","--no-autoupdate" -RedirectStandardOutput $logFile -RedirectStandardError $logFile -WindowStyle Hidden
+        Start-Sleep -Seconds 25
+    
+        # Parse URL từ log
+        Write-Host "🔍 Searching for public RDP URL..."
+        $maxAttempts = 180
+        $attempt = 0
+        $cloudflaredUrl = ""
+        do {
+          Start-Sleep -Seconds 2
+          $attempt++
+          if (Test-Path $logFile) {
+            $log = Get-Content $logFile -Raw -ErrorAction SilentlyContinue
+            if ($log -match "tcp://[a-zA-Z0-9\-\.]+\.trycloudflare\.com:[0-9]+") {
+              $cloudflaredUrl = $matches[0]
+              break
+            }
+          }
+        } while (-not $cloudflaredUrl -and $attempt -lt $maxAttempts)
+    
+        if ($cloudflaredUrl) {
+          Write-Host "✅ Found Cloudflared RDP URL: $cloudflaredUrl"
+    
+          $rdpContent = @"
+    full address:s:$cloudflaredUrl
+    username:s:$env:USERNAME
+    prompt for credentials:i:1
+    "@
+          $rdpContent | Out-File -FilePath "rdp-connection.rdp" -Encoding ASCII
+    
+          Write-Host "💾 Saved RDP file as rdp-connection.rdp"
+          Write-Host "🌍 Connect with Microsoft Remote Desktop (mstsc.exe)"
+          Write-Host "   👉 Address: $cloudflaredUrl"
+          Write-Host "   👉 Username: $env:USERNAME"
+          Write-Host "   👉 Password: (the one from secrets.MY_PASSWORD)"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add rdp-connection.rdp
+          git commit -m "🔗 rdp file - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" --allow-empty
+          git push origin main
+          Write-Host "✅ RDP file committed and pushed"
+        }
+        else {
+          Write-Host "❌ Failed to retrieve Cloudflared URL"
+          Get-Content $logFile -Tail 50 | Write-Host
+          exit 1
+        }
+
+    - name: 🖥️ Chạy VPS
+      shell: pwsh
+      run: |
+        Write-Host "🚀 VPS Session Started - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+
+        $totalMinutes = 330
+        $restartCheckpoint = 320
+        $healthCheckInterval = 15
+        $backupInterval = 60
+
+        for ($i = 1; $i -le $totalMinutes; $i++) {
+          $currentTime = Get-Date -Format 'HH:mm:ss'
+          Write-Host "🟢 VPS Running - Minute $i/$totalMinutes ($currentTime)"
+
+          if ($i -eq $restartCheckpoint) {
+            Write-Host "🔁 Preparing restart in $($totalMinutes - $i) minutes..."
+          }
+
+          # (Tùy chọn) Có thể thêm logic healthcheck hoặc backup ở đây
+          Start-Sleep -Seconds 60
+        }
+
+        Write-Host "⏰ VPS session completed. Preparing restart..."
