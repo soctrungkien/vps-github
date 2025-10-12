@@ -9,7 +9,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://soctrungkien.github.io/1HzH9Axaj/Fira_Code_v6.2/fira_code.css" rel="stylesheet">
     <script src="style.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/libsodium-wrappers.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-sealedbox-js@1.2.0/sealedbox.web.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util/nacl-util.min.js"></script>
 </head>
 <body>
     <a id="hello" style="display: none;">GOODBYE WORLD!</a>
@@ -92,89 +93,84 @@
     return btoa(unescape(encodeURIComponent(str || "")));
   }
 
-  // =========== libsodium loader (used for secrets) ===========
-    async function loadSodium() {
-      try {
-        // Nếu đã load rồi thì bỏ qua
-        if (window.sodium && window.sodium.ready) {
-          await window.sodium.ready;
-          console.log("✅ Libsodium đã sẵn sàng (cache)!");
-          return window.sodium;
-        }
-    
-        console.log("🔹 Đang tải libsodium (non-module build)...");
-        await new Promise((resolve, reject) => {
-          const script = document.createElement("script");
-          script.src = "https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/libsodium-wrappers.js";
-          script.onload = () => resolve();
-          script.onerror = (e) => reject(e);
-          document.head.appendChild(script);
-        });
-    
-        if (!window.sodium) throw new Error("libsodium không load vào window được.");
-        await window.sodium.ready;
-    
-        console.log("✅ Libsodium loaded thành công!");
-        return window.sodium;
-      } catch (err) {
-        console.error("❌ Lỗi khi load libsodium:", err);
-        alert("Không thể tải libsodium. Kiểm tra mạng hoặc thử lại sau.");
-        throw err;
-      }
-    }
+async function ghFetch(arg1, arg2, arg3) {
+  let endpoint, token, options = arg3 || {};
 
-  // =========== Robust ghFetch ===========
-  /**
-   * ghFetch(endpoint, token, options) OR ghFetch(token, endpoint, options)
-   * returns { ok, status, statusText, data, headers }
-   */
-  async function ghFetch(arg1, arg2, arg3){
-    let endpoint, token, options;
-    options = arg3 || {};
-
-    // decide which arg is endpoint/token
-    const isProbablyToken = (s) => typeof s === 'string' && !!s && (
-      s.startsWith('ghp_') || s.startsWith('gho_') || s.startsWith('ghu_') || s.startsWith('ghs_') ||
-      s.startsWith('github_pat_') || s.startsWith('glpat_') || s.startsWith('ghr_') || s.startsWith('github_')
+  const isProbablyToken = (s) =>
+    typeof s === "string" &&
+    !!s &&
+    (
+      s.startsWith("ghp_") || s.startsWith("gho_") || s.startsWith("ghu_") ||
+      s.startsWith("ghs_") || s.startsWith("github_pat_") ||
+      s.startsWith("glpat_") || s.startsWith("ghr_") || s.startsWith("github_")
     );
 
-    if (typeof arg1 === 'string' && (arg1.startsWith('http') || arg1.startsWith('/'))) {
-      endpoint = arg1; token = arg2; options = arg3 || {};
-    } else if (isProbablyToken(arg1)) {
-      token = arg1; endpoint = arg2; options = arg3 || {};
-    } else {
-      // default: assume arg1 is endpoint
-      endpoint = arg1; token = arg2; options = arg3 || {};
-    }
-
-    if (!endpoint) throw new Error('ghFetch: missing endpoint');
-
-    if (!endpoint.startsWith('http')) {
-      endpoint = `https://api.github.com${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
-    }
-
-    let authHeader;
-    if (token) {
-      if (token.startsWith('ghp_') || token.startsWith('github_') || token.startsWith('glpat_')) {
-        authHeader = `token ${token}`;
-      } else {
-        authHeader = `Bearer ${token}`;
-      }
-    }
-
-    const headers = {
-      Accept: "application/vnd.github+json",
-      ...(options.headers || {})
-    };
-    if (authHeader) headers.Authorization = authHeader;
-
-    const res = await fetch(endpoint, { ...options, headers });
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); } catch (e) { data = text; }
-
-    return { ok: res.ok, status: res.status, statusText: res.statusText, data, headers: res.headers };
+  // 🧩 Phân tích tham số
+  if (typeof arg1 === "string" && (arg1.startsWith("http") || arg1.startsWith("/"))) {
+    endpoint = arg1;
+    token = arg2;
+  } else if (isProbablyToken(arg1)) {
+    token = arg1;
+    endpoint = arg2;
+  } else {
+    endpoint = arg1;
+    token = arg2;
   }
+
+  if (!endpoint) throw new Error("ghFetch: missing endpoint");
+
+  // 🧩 Chuẩn hóa endpoint
+  endpoint = endpoint.trim();
+  if (!endpoint.startsWith("http")) {
+    endpoint = `https://api.github.com${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
+  }
+  endpoint = endpoint.replace(/([^:]\/)\/+/g, "$1"); // tránh lỗi double slash
+
+  // 🧩 Làm sạch token
+  if (typeof token === "string") {
+    token = token.trim().replace(/\s+/g, "");
+  }
+
+  // 🧩 Chuẩn header
+  const headers = {
+    Accept: "application/vnd.github+json",
+    ...(options.headers || {}),
+  };
+
+  if (token) {
+    headers.Authorization = token.startsWith("ghp_") || token.startsWith("github_") || token.startsWith("glpat_")
+      ? `token ${token}`
+      : `Bearer ${token}`;
+  }
+
+  // ✅ Giới hạn header về ASCII để tránh lỗi encoding
+  for (const key in headers) {
+    headers[key] = String(headers[key]).replace(/[^\x00-\x7F]/g, "");
+  }
+
+  // 🧩 Fetch có retry nhẹ
+  let res, text, data;
+  try {
+    res = await fetch(endpoint, { ...options, headers });
+    text = await res.text();
+  } catch (err) {
+    console.error(`⚠️ Network error when fetching ${endpoint}:`, err);
+    return { ok: false, status: 0, statusText: "NETWORK_ERROR", data: err, headers: {} };
+  }
+
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = text;
+  }
+
+  // 🧩 Auto log lỗi GitHub
+  if (!res.ok) {
+    console.warn(`❌ GitHub API error ${res.status}:`, data?.message || data);
+  }
+
+  return { ok: res.ok, status: res.status, statusText: res.statusText, data, headers: res.headers };
+}
 
   // =========== detect token ===========
   async function detectToken(token){
@@ -223,28 +219,29 @@
   }
 
     
-    async function createOrUpdateSecret(token, owner, repo, secretName, secretValue) {
-      token = String(token).trim(); // 🔹 tránh ký tự lạ
-    
-      const pk = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/public-key`, token);
-      if (!pk.ok) throw new Error('Không lấy được public key của repo: ' + JSON.stringify(pk.data));
-    
-      const sodium = await loadSodium();
-    
-      const bpub = sodium.from_base64(pk.data.key, sodium.base64_variants.ORIGINAL);
-      const bsec = sodium.from_string(String(secretValue));
-      const sealed = sodium.crypto_box_seal(bsec, bpub);
-      const encrypted_value = sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL);
-    
-      const put = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(secretName)}`, token, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ encrypted_value, key_id: pk.data.key_id })
-      });
-    
-      if (!put.ok) throw new Error('Tạo secret lỗi: ' + JSON.stringify(put.data));
-      return true;
-    }
+async function createOrUpdateSecret(token, owner, repo, secretName, secretValue) {
+  token = String(token).trim();
+
+  // 🔹 Lấy public key của repo
+  const pk = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/public-key`, token);
+  if (!pk.ok) throw new Error('Không lấy được public key của repo: ' + JSON.stringify(pk.data));
+
+  // 🔹 Mã hoá secret bằng tweetnacl sealedbox
+  const publicKey = nacl.util.decodeBase64(pk.data.key);
+  const message = new TextEncoder().encode(String(secretValue));
+  const sealed = sealedbox.seal(message, publicKey);
+  const encrypted_value = nacl.util.encodeBase64(sealed);
+
+  // 🔹 Gửi secret đã mã hoá lên GitHub
+  const put = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(secretName)}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ encrypted_value, key_id: pk.data.key_id })
+  });
+
+  if (!put.ok) throw new Error('Tạo secret lỗi: ' + JSON.stringify(put.data));
+  return true;
+}
 
   // =========== ensure permissions block (simple) ===========
   function ensurePermissionsAndDispatch(workflowText){
