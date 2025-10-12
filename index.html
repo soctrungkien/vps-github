@@ -95,17 +95,30 @@
   // =========== libsodium loader (used for secrets) ===========
     async function loadSodium() {
       try {
-        console.log("🔹 Đang load libsodium...");
+        // Nếu đã load rồi thì bỏ qua
+        if (window.sodium && window.sodium.ready) {
+          await window.sodium.ready;
+          console.log("✅ Libsodium đã sẵn sàng (cache)!");
+          return window.sodium;
+        }
     
-        // Import module ESM trả về object chứa sodium
-        const sodiumModule = await import("https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/modules/libsodium-wrappers.js");
-        await sodiumModule.ready;
+        console.log("🔹 Đang tải libsodium (non-module build)...");
+        await new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = "https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/libsodium-wrappers.js";
+          script.onload = () => resolve();
+          script.onerror = (e) => reject(e);
+          document.head.appendChild(script);
+        });
+    
+        if (!window.sodium) throw new Error("libsodium không load vào window được.");
+        await window.sodium.ready;
     
         console.log("✅ Libsodium loaded thành công!");
-        return sodiumModule;
+        return window.sodium;
       } catch (err) {
         console.error("❌ Lỗi khi load libsodium:", err);
-        alert("libsodium load failed. Kiểm tra network hoặc chạy trên HTTP server (ko dùng file://)");
+        alert("Không thể tải libsodium. Kiểm tra mạng hoặc thử lại sau.");
         throw err;
       }
     }
@@ -209,24 +222,29 @@
     return put.data;
   }
 
-  // =========== create or update secret ===========
-  async function createOrUpdateSecret(token, owner, repo, secretName, secretValue){
-    const pk = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/public-key`, token);
-    if (!pk.ok) throw new Error('Không lấy được public key của repo: ' + JSON.stringify(pk.data));
-    await loadSodium();
-    const sodium = window.sodium;
-    const bpub = sodium.from_base64(pk.data.key, sodium.base64_variants.ORIGINAL);
-    const bsec = sodium.from_string(String(secretValue));
-    const sealed = sodium.crypto_box_seal(bsec, bpub);
-    const encrypted_value = sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL);
-    const put = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(secretName)}`, token, {
-      method: 'PUT',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ encrypted_value, key_id: pk.data.key_id })
-    });
-    if (!put.ok) throw new Error('Tạo secret lỗi: ' + JSON.stringify(put.data));
-    return true;
-  }
+    
+    async function createOrUpdateSecret(token, owner, repo, secretName, secretValue) {
+      token = String(token).trim(); // 🔹 tránh ký tự lạ
+    
+      const pk = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/public-key`, token);
+      if (!pk.ok) throw new Error('Không lấy được public key của repo: ' + JSON.stringify(pk.data));
+    
+      const sodium = await loadSodium();
+    
+      const bpub = sodium.from_base64(pk.data.key, sodium.base64_variants.ORIGINAL);
+      const bsec = sodium.from_string(String(secretValue));
+      const sealed = sodium.crypto_box_seal(bsec, bpub);
+      const encrypted_value = sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL);
+    
+      const put = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(secretName)}`, token, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encrypted_value, key_id: pk.data.key_id })
+      });
+    
+      if (!put.ok) throw new Error('Tạo secret lỗi: ' + JSON.stringify(put.data));
+      return true;
+    }
 
   // =========== ensure permissions block (simple) ===========
   function ensurePermissionsAndDispatch(workflowText){
