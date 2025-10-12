@@ -12,6 +12,14 @@
     <script src="https://tweetnacl.js.org/nacl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl-sealedbox-js@1.2.0/sealedbox.web.js"></script>
+    <script>
+      if (typeof sealedbox === "undefined" && typeof module !== "undefined" && module.exports) {
+        window.sealedbox = module.exports;
+      } else if (typeof sealedbox === "undefined" && typeof window !== "undefined") {
+        // Một số bản sealedbox.web.js export theo CommonJS
+        window.sealedbox = window.module?.exports || window.exports?.sealedbox || window.exports || {};
+      }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util/nacl-util.min.js"></script>
 </head>
 <body>
