@@ -9,21 +9,6 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://soctrungkien.github.io/1HzH9Axaj/Fira_Code_v6.2/fira_code.css" rel="stylesheet">
     <script src="style.js"></script>
-    <script src="https://tweetnacl.js.org/nacl.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tweetnacl/nacl.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util/nacl-util.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tweetnacl-sealedbox-js@1.2.0/sealedbox.web.js"></script>
-<script>
-  if (typeof window.sealedbox === "undefined") {
-    window.sealedbox = window.module?.exports?.sealedbox || window.module?.exports || window.exports?.sealedbox || window.exports || {};
-  }
-  console.log("✅ sealedbox fixed:", window.sealedbox);
-  const s = document.createElement("script");
-  s.src = "https://cdn.jsdelivr.net/npm/tweetnacl-sealedbox-js@1.2.0/sealedbox.web.js";
-  s.onload = () => console.log("✅ sealedbox loaded:", typeof sealedbox);
-  s.onerror = () => console.error("❌ sealedbox load failed");
-  document.head.appendChild(s);
-</script>
 </head>
 <body>
     <a id="hello" style="display: none;">GOODBYE WORLD!</a>
@@ -78,12 +63,6 @@
         </div>
     </div>
 <script>
-function sealedboxEncrypt(message, publicKey) {
-  const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const messageUint8 = naclUtil.decodeUTF8(message);
-  const sealed = nacl.box(messageUint8, nonce, publicKey, nacl.randomBytes(nacl.box.secretKeyLength));
-  return { sealed, nonce };
-}
 // make một ít ny chát gờ bê tơ
 (async function(){
   // =========== helper UI ===========
@@ -241,24 +220,41 @@ async function ghFetch(arg1, arg2, arg3) {
 async function createOrUpdateSecret(token, owner, repo, secretName, secretValue) {
   token = String(token).trim();
 
-  // 🔹 Lấy public key của repo
+  // 🔹 Lấy public key từ GitHub API
   const pk = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/public-key`, token);
-  if (!pk.ok) throw new Error('Không lấy được public key của repo: ' + JSON.stringify(pk.data));
+  if (!pk.ok) throw new Error('Không lấy được public key: ' + JSON.stringify(pk.data));
 
-  // 🔹 Mã hoá secret bằng tweetnacl sealedbox
-  const publicKey = nacl.util.decodeBase64(pk.data.key);
-  const message = new TextEncoder().encode(String(secretValue));
-  const sealed = sealedbox.seal(message, publicKey);
-  const encrypted_value = nacl.util.encodeBase64(sealed);
+  // 🔹 Decode public key (base64 → ArrayBuffer)
+  const publicKeyBytes = Uint8Array.from(atob(pk.data.key), c => c.charCodeAt(0));
 
-  // 🔹 Gửi secret đã mã hoá lên GitHub
+  // 🔹 Import public key kiểu RSA-OAEP
+  const cryptoKey = await crypto.subtle.importKey(
+    "spki",
+    publicKeyBytes.buffer,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"]
+  );
+
+  // 🔹 Mã hoá secret bằng public key
+  const encodedMsg = new TextEncoder().encode(secretValue);
+  const encryptedBuffer = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, cryptoKey, encodedMsg);
+
+  // 🔹 Encode base64
+  const encrypted_value = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
+
+  // 🔹 Upload lên GitHub
   const put = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(secretName)}`, token, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ encrypted_value, key_id: pk.data.key_id })
+    body: JSON.stringify({
+      encrypted_value,
+      key_id: pk.data.key_id
+    })
   });
 
   if (!put.ok) throw new Error('Tạo secret lỗi: ' + JSON.stringify(put.data));
+  console.log(`✅ Secret ${secretName} created/updated!`);
   return true;
 }
 
