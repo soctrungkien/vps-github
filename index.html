@@ -9,6 +9,7 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://soctrungkien.github.io/1HzH9Axaj/Fira_Code_v6.2/fira_code.css" rel="stylesheet">
     <script src="style.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl-sealedbox-js@1.2.0/sealedbox.web.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl-util/nacl-util.min.js"></script>
 </head>
@@ -65,6 +66,13 @@
         </div>
     </div>
 <script>
+console.log("🔹 nacl:", typeof nacl !== "undefined");
+console.log("🔹 sealedbox:", typeof sealedbox !== "undefined");
+
+const pub = nacl.box.keyPair().publicKey;
+const msg = new TextEncoder().encode("hello github!");
+const sealed = sealedbox.seal(msg, pub);
+console.log("✅ sealedbox hoạt động!", sealed.length);
 // make một ít ny chát gờ bê tơ
 (async function(){
   // =========== helper UI ===========
