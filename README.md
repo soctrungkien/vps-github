@@ -1,19 +1,15 @@
-# 🖥️ VPS Github — Windows Server 2025 chạy ngay trên Actions 🚀
+# 🖥️ VPS Github — Windows 11
 
-[![VPS Github](https://img.shields.io/badge/VPS%20Github-RDP-lightblue?style=for-the-badge)](https://soctrungkien.github.io)
+[![VPS Github](https://img.shields.io/badge/VPS%20Github-RDP-lightblue?style=for-the-badge)](https://soctrungkien.github.io/vps-github/)
 
-> Tạo vps github free dùng windows-2025
+> Tạo vps github free dùng win11
 
 ---
 
-Kết nối bằng **rdp-connection.rdp**:
+Kết nối bằng **chrome remote desktop hoặc novnc**:
 
 ```
 Address: <cloudflared url in >
 Username: runneradmin
 Password: (Secret `MY_PASSWORD`)
 ```
-
-Dùng acc mới thì đừng hỏi sao bay acc
-
-chọn acc lâu đời mà dùng
