@@ -8,8 +8,6 @@
 
 Kết nối bằng **chrome remote desktop hoặc novnc**:
 
+
 ```
-Address: <cloudflared url in >
-Username: runneradmin
-Password: (Secret `MY_PASSWORD`)
-```
+
