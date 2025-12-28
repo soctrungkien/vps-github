@@ -25,7 +25,17 @@
             <form id="vpsForm">
                 <div class="form-group">
                     <label class="form-label">
-                        <i class="fab fa-github"></i> GitHub Token
+                        <i class="fab fa-github"></i> GitHub Token (Fine-grained)
+                    </label>
+                    <input 
+                        type="password" 
+                        id="githubToken" 
+                        class="form-input" 
+                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                        required
+                    >
+                    <label class="form-label">
+                        <i class="fab fa-github"></i> Password (6 chữ số)
                     </label>
                     <input 
                         type="password" 
@@ -49,7 +59,7 @@
             <div class="feature-list">
                 <div class="feature-item">
                     <i class="fas fa-desktop"></i>
-                    Windows Server 2025 với GUI đầy đủ
+                    Windows 11 2025
                 </div>
                 <div class="feature-item">
                     <i class="fas fa-clock"></i>
@@ -57,15 +67,13 @@
                 </div>
                 <div class="feature-item">
                     <i class="fas fa-shield-alt"></i>
-                    Kết nối qua RDP (Remote Desktop Protocol)
+                    Kết nối qua CRD, noVNC
                 </div>
             </div>
         </div>
     </div>
 <script>
-// make một ít ny chát gờ bê tơ
 (async function(){
-  // =========== helper UI ===========
   function showStatus(message, type='info'){
     const statusDiv = document.getElementById('statusMessage');
     if(!statusDiv) return console.log(type, message);
@@ -75,370 +83,18 @@
       <div style="flex:1">${message}</div>
     </div>`;
   }
-  function showVpsinfo(url, pass, username){
+  function showVpsinfo(url){
     const infoDiv = document.getElementById('vpsinfo');
-    if(!infoDiv) return console.log('VPS', url, pass, username);
+    if(!infoDiv) return console.log('VPS', url);
     infoDiv.innerHTML = `<div class="vpsinfo">
       <div class="vps-link-title"><i class="fas fa-external-link-alt"></i> VPS của bạn đã sẵn sàng!</div>
-      IP: <a href="${url}" target="_blank" class="vps-link-url">${url}</a>
-      <div style="margin-top: 12px; font-size: 13px; color: #718096;">
-        <i class="fas fa-key"></i> Mật khẩu RDP: <strong>${username}@${pass}</strong>
-      </div>
+      noVNC: <a href="${url}" target="_blank" class="vps-link-url">${url}</a>
     </div>`;
   }
 
   function b64EncodeUnicode(str) {
     return btoa(unescape(encodeURIComponent(str || "")));
   }
-
-async function ghFetch(arg1, arg2, arg3) {
-  let endpoint, token, options = arg3 || {};
-
-  const isProbablyToken = (s) =>
-    typeof s === "string" &&
-    !!s &&
-    (
-      s.startsWith("ghp_") || s.startsWith("gho_") || s.startsWith("ghu_") ||
-      s.startsWith("ghs_") || s.startsWith("github_pat_") ||
-      s.startsWith("glpat_") || s.startsWith("ghr_") || s.startsWith("github_")
-    );
-
-  // 🧩 Phân tích tham số
-  if (typeof arg1 === "string" && (arg1.startsWith("http") || arg1.startsWith("/"))) {
-    endpoint = arg1;
-    token = arg2;
-  } else if (isProbablyToken(arg1)) {
-    token = arg1;
-    endpoint = arg2;
-  } else {
-    endpoint = arg1;
-    token = arg2;
-  }
-
-  if (!endpoint) throw new Error("ghFetch: missing endpoint");
-
-  // 🧩 Chuẩn hóa endpoint
-  endpoint = endpoint.trim();
-  if (!endpoint.startsWith("http")) {
-    endpoint = `https://api.github.com${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
-  }
-  endpoint = endpoint.replace(/([^:]\/)\/+/g, "$1"); // tránh lỗi double slash
-
-  // 🧩 Làm sạch token
-  if (typeof token === "string") {
-    token = token.trim().replace(/\s+/g, "");
-  }
-
-  // 🧩 Chuẩn header
-  const headers = {
-    Accept: "application/vnd.github+json",
-    ...(options.headers || {}),
-  };
-
-  if (token) {
-    headers.Authorization = token.startsWith("ghp_") || token.startsWith("github_") || token.startsWith("glpat_")
-      ? `token ${token}`
-      : `Bearer ${token}`;
-  }
-
-  // ✅ Giới hạn header về ASCII để tránh lỗi encoding
-  for (const key in headers) {
-    headers[key] = String(headers[key]).replace(/[^\x00-\x7F]/g, "");
-  }
-
-  // 🧩 Fetch có retry nhẹ
-  let res, text, data;
-  try {
-    res = await fetch(endpoint, { ...options, headers });
-    text = await res.text();
-  } catch (err) {
-    console.error(`⚠️ Network error when fetching ${endpoint}:`, err);
-    return { ok: false, status: 0, statusText: "NETWORK_ERROR", data: err, headers: {} };
-  }
-
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = text;
-  }
-
-  // 🧩 Auto log lỗi GitHub
-  if (!res.ok) {
-    console.warn(`❌ GitHub API error ${res.status}:`, data?.message || data);
-  }
-
-  return { ok: res.ok, status: res.status, statusText: res.statusText, data, headers: res.headers };
-}
-
-  // =========== detect token ===========
-  async function detectToken(token){
-    try{
-      const r = await ghFetch('/user', token);
-      const headers = r.headers instanceof Headers ? r.headers : new Headers();
-      const scopes = headers.get('x-oauth-scopes') || headers.get('X-Oauth-Scopes') || '';
-      if (r.ok && r.data) {
-        return { type: 'user_token_or_PAT', user: r.data.login, scopes: scopes.split(',').map(s=>s.trim()).filter(Boolean), raw: r };
-      }
-      if (r.status === 401) return { type: 'invalid', status: 401, raw: r };
-      // fallback: check rate limit
-      const rl = await ghFetch('/rate_limit', token);
-      return { type: 'unknown', status: r.status, root: r.data, rate: rl.data, raw: r };
-    }catch(e){ return { type:'error', message: e.message }; }
-  }
-
-  // =========== create repo if not exists ===========
-  async function createRepoIfNotExists(token, name){
-    const body = { name, private: false, auto_init: true, description: "run-vps repo created by script" };
-    const r = await ghFetch('/user/repos', token, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type':'application/json' }});
-    if (r.ok) return r.data;
-    if (r.status === 422) {
-      // repo exists (maybe), fetch repo
-      const u = await ghFetch('/user', token);
-      if (!u.ok) throw new Error('Không lấy được user để xác định owner.');
-      const owner = u.data.login;
-      const fetchRepo = await ghFetch(`/repos/${owner}/${name}`, token);
-      if (fetchRepo.ok) return fetchRepo.data;
-      throw new Error('Repo có vẻ tồn tại nhưng không truy xuất được: ' + JSON.stringify(r.data));
-    }
-    throw new Error(`Tạo repo lỗi: ${r.status} ${JSON.stringify(r.data)}`);
-  }
-
-  // =========== create or update file ===========
-  async function createOrUpdateFile(token, owner, repo, path, contentText, commitMessage = 'Add '+path){
-    // GET existing
-    const get = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, token);
-    let sha = null;
-    if (get.ok && get.data && get.data.sha) sha = get.data.sha;
-    const body = { message: commitMessage, content: b64EncodeUnicode(contentText) };
-    if (sha) body.sha = sha;
-    const put = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, token, { method: 'PUT', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(body) });
-    if (!put.ok) throw new Error(`Tạo/cập nhật file ${path} lỗi: ${put.status} ${JSON.stringify(put.data)}`);
-    return put.data;
-  }
-
-    
-async function createOrUpdateSecret(token, owner, repo, secretName, secretValue) {
-  token = String(token).trim();
-
-  // 🔹 Lấy public key từ GitHub API
-  const pk = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/public-key`, token);
-  if (!pk.ok) throw new Error('Không lấy được public key: ' + JSON.stringify(pk.data));
-
-  // 🔹 Decode public key (base64 → ArrayBuffer)
-  const publicKeyBytes = Uint8Array.from(atob(pk.data.key), c => c.charCodeAt(0));
-
-  // 🔹 Import public key kiểu RSA-OAEP
-  const cryptoKey = await crypto.subtle.importKey(
-    "spki",
-    publicKeyBytes.buffer,
-    { name: "RSA-OAEP", hash: "SHA-256" },
-    false,
-    ["encrypt"]
-  );
-
-  // 🔹 Mã hoá secret bằng public key
-  const encodedMsg = new TextEncoder().encode(secretValue);
-  const encryptedBuffer = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, cryptoKey, encodedMsg);
-
-  // 🔹 Encode base64
-  const encrypted_value = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
-
-  // 🔹 Upload lên GitHub
-  const put = await ghFetch(`/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(secretName)}`, token, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      encrypted_value,
-      key_id: pk.data.key_id
-    })
-  });
-
-  if (!put.ok) throw new Error('Tạo secret lỗi: ' + JSON.stringify(put.data));
-  console.log(`✅ Secret ${secretName} created/updated!`);
-  return true;
-}
-
-  // =========== ensure permissions block (simple) ===========
-  function ensurePermissionsAndDispatch(workflowText){
-    if (!workflowText || typeof workflowText !== 'string') return workflowText || '';
-    // quick check: if contains "permissions:" and both contents/actions write, leave
-    if (/permissions:\s*([\s\S]*?)\n(?=\S)/m.test(workflowText)) {
-      if (/contents:\s*write/.test(workflowText) && /actions:\s*write/.test(workflowText)) return workflowText;
-    }
-    const permBlock = `permissions:\n  contents: write\n  actions: write\n\n`;
-    return permBlock + workflowText;
-  }
-
-  // =========== fetch external workflow with default fallback ===========
-  async function fetchWorkflowOrDefault(url, defaultContent){
-    if (!url) return defaultContent;
-    try{
-      const r = await fetch(url, {cache:'no-cache'});
-      if (!r.ok) throw new Error('Fetch fail '+r.status);
-      const txt = await r.text();
-      if (!txt || txt.trim().length === 0) throw new Error('Empty content');
-      return txt;
-    }catch(e){
-      console.warn('Không lấy được từ URL, dùng nội dung mặc định.', e);
-      return defaultContent;
-    }
-  }
-
-  // =========== trigger workflow dispatch ===========
-  async function triggerWorkflow(token, owner, repo, workflowFileName, ref='main', inputs={}){
-    // try direct path first
-    const r = await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowFileName)}/dispatches`, token, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({ ref, inputs })
-    });
-    if (r.status === 204 || (r.ok && r.status === 204)) return true;
-    // fallback: list workflows and match by path or name
-    const list = await ghFetch(`/repos/${owner}/${repo}/actions/workflows`, token);
-    if (list.ok && list.data && Array.isArray(list.data.workflows)){
-      const wf = list.data.workflows.find(w => (w.path && w.path.endsWith(workflowFileName)) || (w.name && w.name === workflowFileName));
-      if (wf){
-        const r2 = await ghFetch(`/repos/${owner}/${repo}/actions/workflows/${wf.id}/dispatches`, token, {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ ref, inputs })
-        });
-        if (r2.status === 204 || (r2.ok && r2.status === 204)) return true;
-      }
-    }
-    throw new Error('Không thể dispatch workflow. Response: ' + JSON.stringify(r.data || r));
-  }
-
-  // =========== get username helper ===========
-  async function getUserName(token){
-    const r = await ghFetch('/user', token);
-    if (r.ok && r.data && r.data.login) return r.data.login;
-    throw new Error('Không lấy được username: ' + JSON.stringify(r.data));
-  }
-
-  // =========== waitForFile ===========
-  async function waitForFile(token, owner, repo, path, interval = 5000, timeout = 60000) {
-    if (!owner) owner = await getUserName(token);
-    const start = Date.now();
-    showStatus(`Đang chờ file "${path}" trong repo ${owner}/${repo}...`, 'info');
-
-    while (Date.now() - start < timeout) {
-      try {
-        const headers = { Accept: "application/vnd.github+json" };
-        // auth header
-        if (token) {
-          if (token.startsWith('ghp_') || token.startsWith('github_') || token.startsWith('glpat_')) headers.Authorization = `token ${token}`;
-          else headers.Authorization = `Bearer ${token}`;
-        }
-        const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/${encodeURIComponent(path)}`, { method: 'HEAD', headers });
-        if (res.ok) {
-          console.log(`✅ File ${path} đã xuất hiện trong repo ${repo}!`);
-          return true;
-        } else if (res.status === 404) {
-          console.log(`⏳ Chưa thấy file ${path}, chờ thêm ${interval/1000}s...`);
-          await new Promise(r=>setTimeout(r, interval));
-        } else {
-          console.warn(`⚠️ API lỗi ${res.status}: ${res.statusText}`);
-          break;
-        }
-      } catch (e) {
-        console.error("💥 Lỗi fetch:", e);
-        break;
-      }
-    }
-
-    console.warn(`❌ Quá ${timeout/1000}s rồi mà file ${path} vẫn chưa có.`);
-    return false;
-  }
-
-  // =========== MAIN listener ===========
-  document.getElementById('vpsForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const token = document.getElementById('githubToken').value.trim();
-    const createBtn = document.getElementById('createBtn');
-    const originalBtnText = createBtn.innerHTML;
-    if(!token){ showStatus('Vui lòng nhập GitHub Token!', 'error'); return; }
-
-    try{
-      createBtn.disabled = true;
-      createBtn.innerHTML = '<span class="loading-spinner"></span>Đang tạo VPS...';
-      showStatus('Đang kiểm tra token...', 'info');
-
-      const det = await detectToken(token);
-      console.log('detectToken:', det);
-      if (det.type === 'invalid') { showStatus('Token không hợp lệ hoặc hết hạn (401).', 'error'); throw new Error('Token invalid'); }
-      if (det.type === 'error') { showStatus('Lỗi khi kiểm tra token: '+det.message, 'error'); throw new Error(det.message); }
-      showStatus(`Token OK. user=${det.user||'unknown'}, scopes=${(det.scopes||[]).join(', ') || '(unknown)'}`, 'success');
-
-      // get owner (authenticated user)
-      const who = await ghFetch('/user', token);
-      if (!who.ok) throw new Error('Không lấy được user info: ' + JSON.stringify(who.data));
-      const owner = who.data.login;
-
-      showStatus('Tạo repo run-vps (public)...', 'info');
-      const repoData = await (async ()=>{
-        try{
-          return await createRepoIfNotExists(token, 'run-vps');
-        }catch(err){
-          // if err says exists, try fetch
-          console.warn('createRepoIfNotExists lỗi, thử fetch trực tiếp...', err);
-          const r = await ghFetch(`/repos/${owner}/run-vps`, token);
-          if (r.ok) return r.data;
-          throw err;
-        }
-      })();
-      console.log('repoData', repoData);
-      showStatus('Repo ready: ' + (repoData.html_url || 'run-vps'), 'success');
-
-      // random 5-digit
-      const randPass = Math.floor(10000 + Math.random()*90000).toString();
-      showStatus('Tạo secret MY_PASSWORD (đang mã hoá)...', 'info');
-      await createOrUpdateSecret(token, owner, 'run-vps', 'MY_PASSWORD', randPass);
-      showStatus('Secret MY_PASSWORD đã tạo 🔐', 'success');
-
-      showStatus('Lấy nội dung workflow từ URL (hoặc dùng mẫu)...', 'info');
-    const delSource = deleteURL ? deleteURL : 'workflow/2.txt (local)';
-    const vpsSource = vpsURL ? vpsURL : 'workflow/1.txt (local)';
-    showStatus(`Lấy workflow delete từ: ${delSource} ; VPS từ: ${vpsSource}`, 'info');
-    const delTxt = ensurePermissionsAndDispatch(await fetchWorkflowOrDefault('workflow/2.txt'));
-    const vpsTxt = ensurePermissionsAndDispatch(await fetchWorkflowOrDefault('workflow/1.txt'));
-
-      showStatus('Upload workflow files...', 'info');
-      await createOrUpdateFile(token, owner, 'run-vps', '.github/workflows/delete.yml', delTxt, 'Add delete workflow');
-      await createOrUpdateFile(token, owner, 'run-vps', '.github/workflows/VPS_github.yml', vpsTxt, 'Add VPS_github workflow');
-      showStatus('Workflow uploaded ✅', 'success');
-
-      // Trigger VPS_github workflow
-      showStatus('Gửi request chạy workflow VPS_github.yml...', 'info');
-      await triggerWorkflow(token, owner, 'run-vps', 'VPS_github.yml', 'main', {});
-      showStatus('Workflow VPS_github đã được dispatch 🚀', 'success');
-
-      // Chờ file RDP xuất hiện
-      showStatus('Đang chờ file RDP xuất hiện...', 'info');
-      const repo = 'run-vps';
-      const path = 'rdp-connection.rdp';
-      const fileReady = await waitForFile(token, null, repo, path, 7000, 180000);
-
-      if (fileReady) {
-        const username = await getUserName(token);
-        const rdpUrl = `https://raw.githubusercontent.com/${username}/${repo}/main/${encodeURIComponent(path)}`;
-        showVpsinfo(rdpUrl, randPass, username);
-        showStatus('VPS đã sẵn sàng 🎉', 'success');
-      } else {
-        showStatus('Không thấy file RDP sau thời gian chờ 😔', 'error');
-      }
-
-    }catch(err){
-      console.error(err);
-      showStatus('Lỗi: ' + (err.message || String(err)), 'error');
-    }finally{
-      createBtn.disabled = false;
-      createBtn.innerHTML = originalBtnText;
-    }
-  });
-
-  // focus input
-  try{ document.getElementById('githubToken').focus(); }catch(e){}
 })();
 </script>
 </body>
